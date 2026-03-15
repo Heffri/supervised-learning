@@ -1,0 +1,13 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Rendered output (optional — remove if you want to commit HTML reports)
+project_a/report/*.html
+project_b/report/*.html
+
+# OS
+.DS_Store
+Thumbs.db
