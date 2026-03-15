@@ -1,32 +1,50 @@
 # Supervised Statistical Learning — Projects
 
-Two statistical learning projects applying regression and classification methods to real datasets. Implemented in R using RMarkdown for reproducible analysis.
+Two statistical learning projects applying regression and mixed-effects modelling to real datasets. Implemented in R using RMarkdown for reproducible analysis.
 
 **Course:** Introduction to Supervised Statistical Learning — Stockholm University (MT5021)
 
 ---
 
-## Project A — [Short description of what Project A was about]
+## Project A — Computer Price Regression
 
-Exploratory and predictive analysis using supervised learning techniques on the `A7_datorer` dataset.
+Predicting computer prices from hardware specifications using multiple linear regression with model selection and cross-validation.
 
-**Methods used:** <!-- e.g. Linear regression, LASSO, Ridge, cross-validation -->
+**Dataset:** 80 computers with 7 features — RAM (MB), clock speed (GHz), hard drive (GB), CD-ROM speed, OS, and age — predicting retail price.
 
-**Key findings:** <!-- 1-2 sentences about what you found -->
+**Methods used:**
 
-→ See `project_a/report/` for the full report.
+- Log-transformed linear regression (correcting right-skewed price distribution)
+- Three model selection approaches: full model, manual feature reduction, and backward elimination via AIC (`step()`)
+- Outlier detection and removal using Cook's distance
+- Multicollinearity diagnostics via VIF
+- Predictive evaluation via 80/20 train-test split (RMSE with back-transformation)
+- Leave-One-Out Cross-Validation (LOOCV) using `caret`
+- Final model comparison table (Adjusted R², RMSE)
+
+→ See `project_a/src/` for the full analysis.
 
 ---
 
-## Project B — [Short description of what Project B was about]
+## Project B — Mussel Stress Response to Copper Exposure (HSP70)
 
-<!-- Brief description of Project B's dataset and goal -->
+Analysing whether copper exposure triggers a heat shock protein (HSP70) stress response in blue mussels, using a hierarchical experimental design with mixed-effects models.
 
-**Methods used:** <!-- e.g. Classification trees, random forests, logistic regression -->
+**Dataset:** 72 mussel samples from 6 locations across 2 regions (North/South Sweden), exposed to either copper treatment or control conditions. Measured HSP70 and actin protein levels.
 
-**Key findings:** <!-- 1-2 sentences -->
+**Methods used:**
 
-→ See `project_b/report/` for the full report.
+- Hierarchical mixed-effects models (`lme4` / `lmerTest`) with nested random effects (region → location → container)
+- Log-transformation for normality (verified via Shapiro-Wilk test and QQ-plots)
+- Variance component analysis — decomposing total variation into region, location, container, and residual
+- Treatment × Region interaction modelling
+- Likelihood ratio test comparing models with and without interaction
+- Back-transformation of coefficients to interpret treatment effect as a multiplicative factor on the original scale
+- Full model diagnostics (residual plots, QQ-plots, grouped residual analysis)
+
+**Key finding:** Copper exposure significantly increased normalised HSP70 expression. The treatment effect was estimated as a multiplicative factor on the original protein scale, with confidence intervals derived from the log-scale model.
+
+→ See `project_b/src/` for the full analysis.
 
 ---
 
@@ -36,31 +54,30 @@ Exploratory and predictive analysis using supervised learning techniques on the 
 supervised-learning/
 ├── project_a/
 │   ├── src/
-│   │   └── main.Rmd        # Analysis and modelling
-│   ├── data/               # Dataset(s) used
-│   └── report/             # Rendered PDF/HTML report
+│   │   ├── main.Rmd        # Full RMarkdown analysis
+│   │   └── slut.R          # Final model comparison script
+│   └── data/
+│       └── A7_datorer.csv   # Computer hardware dataset
 ├── project_b/
 │   ├── src/
-│   │   └── main.Rmd
-│   ├── data/
-│   └── report/
+│   │   ├── main.Rmd        # Full RMarkdown analysis
+│   │   ├── functions.R     # All modelling and diagnostics code
+│   │   └── final_model.r   # Selected final model specification
+│   └── data/
+│       └── B3_musslor_HSP70.csv  # Mussel HSP70 measurements
+├── .gitignore
 └── README.md
 ```
 
 ## Requirements
 
-R packages used:
-
 ```r
-install.packages(c("tidyverse", "caret", "glmnet", "rmarkdown", "knitr"))
+install.packages(c(
+  "tidyverse", "caret", "car",        # Project A
+  "lme4", "lmerTest", "effects"        # Project B
+))
 ```
 
 ## Reproducing the Analysis
 
 Open `project_a/src/main.Rmd` or `project_b/src/main.Rmd` in RStudio and knit to HTML or PDF.
-
-## What's Next
-
-- [ ] Fill in project descriptions above once reports are reviewed
-- [ ] Extend Project B with an additional model comparison
-- [ ] Add a combined summary notebook comparing methods across both projects

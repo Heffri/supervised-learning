@@ -1,0 +1,556 @@
+---
+title: "Övningsprojekt B - Systemekologisk studie på musslor i Östersjön HSP70"
+author: ''
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r}
+library(tidyverse) # paket som inkluderar många statistika packages
+library(lme4)
+library(lmerTest)
+library(effects)
+# source("R_scripts/functions.R")
+```
+
+# Inläsning av data
+
+```{r}
+raw_data <- read.csv("data/raw/B3_musslor_HSP70.csv")
+str(raw_data)
+dim(raw_data)
+```
+
+```{r}
+summary(raw_data)
+```
+
+```{r}
+sum(is.na(raw_data))
+```
+
+Har inga saknande värde.
+
+## Testning av balanserad data
+
+Vi har
+
+-   2 områden
+
+-   3 lokaler per område
+
+-   2 behandlingar per lokal \* behandling = 4 behållare per lokal
+
+-   3 musslor per behållare
+
+Vi ska alltså ha 72 musslor.
+
+```{r}
+# antal observationer per område
+table(raw_data$omr)
+
+#  antal observationer per lokal
+table(raw_data$lokal)
+
+# antal observationer per område × lokal
+table(raw_data$omr, raw_data$lokal)
+
+# antal observationer per lokal × behandling
+with(raw_data, table(lokal, behandl))
+
+# antal observationer per lokal × behandling × behållare
+with(raw_data, table(lokal, behandl, behallare))
+
+```
+
+Vi verkar ha balanserad data och kan därmed säkert använda oss av `aov` och annat eftersom vi har nu garanterat att designmatrisen har egenskapen att \$A\^T A\$ är en diagonalmatris.
+
+På grund av `chr` behöver vi omvandla till faktorer:
+
+```{r}
+raw_data$omr <- as.factor(raw_data$omr)
+raw_data$lokal <- as.factor(raw_data$lokal)
+raw_data$behandl <- as.factor(raw_data$behandl)
+raw_data$behallare <- as.factor(raw_data$behallare)
+
+raw_data$omr
+```
+
+## Normalisering
+
+```{r}
+# normaliserar enligt hsp70/aktin
+raw_data$hsp70_norm <- raw_data$hsp70/raw_data$aktin
+summary(raw_data$hsp70_norm)
+range(raw_data$hsp70_norm)
+```
+
+## Samband
+
+```{r, fig.cap ="Numeriska variabler färgkodade efter område, röd = söder, blå = norr"}
+pairs(~ raw_data$hsp70_norm + aktin , 
+      data = raw_data,
+      col = c("red", "blue")[raw_data$omr],
+      main = "Numeriska variabler färgkodade efter område")
+```
+
+Röda punkter ligger generellt högre i hsp70_norm (plot 2) som tyder på att söder har i snitt ett högre hsp70_norm värde än norra.
+
+## Hantering av den hierarkiska strukturen
+
+Vi har följande hierarkiska struktur på vår dataset
+
+Område (N/S) systematisk [2 totalt]
+
+\|- Lokal inte strikt slumpmässiga [3 per område]
+
+\|- \|- Behandling systematisk []
+
+\|- \|- \|- Behållare slumpmässig [2 per lokal $\times$ behandling, dvs. 4 totalt per lokal]
+
+\|- \|- \|- \|- Mussla replikat [3 per behållare]
+
+På grund av denna struktur behöver vi bygga en hierarkisk modell, gör detta via `lmer`.
+
+# Kontrolldata undersökning
+
+```{r}
+# filtrear och hämtar bara kontrolldatan
+kontroll_data <- subset(raw_data, behandl == "Kontroll")
+
+# modell 1: original skala
+modell_kontroll_orig <- lmer(
+  hsp70_norm ~ omr + (1 | omr:lokal),
+  data = kontroll_data
+)
+
+
+#print(summary(modell_kontroll_orig))
+#print(anova(modell_kontroll_orig))
+# testa log-transformation
+kontroll_data$log_hsp70_norm <- log(kontroll_data$hsp70_norm)
+
+# modell 2: log-transformerad
+modell_kontroll_log <- lmer(
+  log_hsp70_norm ~ omr + (1 | omr:lokal),
+  data = kontroll_data
+)
+
+res_orig <- residuals(modell_kontroll_orig)
+fitted_orig <- fitted(modell_kontroll_orig)
+
+res_log <- residuals(modell_kontroll_log)
+fitted_log <- fitted(modell_kontroll_log)
+
+#print(summary(modell_kontroll_log))
+#print(anova(modell_kontroll_log))
+
+
+
+
+par(mfrow = c(2,3))
+# original res vs fitted
+plot(fitted_orig, res_orig, 
+     main = "Residuals vs. Fitted (Original)", 
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# qq 
+qqnorm(res_orig, main = "QQ-plot Residuals (Original)")
+qqline(res_orig, col = "red")
+
+# histogram residualerna
+hist(res_orig, main = "Histogram Residuals (Original)", xlab = "Residuals")
+
+# log transofmrerad diagnostik
+plot(fitted_log, res_log, 
+     main = "Residuals vs. Fitted (Log)", 
+     xlab = "Fitted Values (log-scale)", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+
+qqnorm(res_log, main = "QQ-plot Residuals (Log)")
+qqline(res_log, col = "red")
+
+
+hist(res_log, main = "Histogram Residuals (Log)", xlab = "Residuals")
+
+par(mfrow = c(1, 1))
+
+```
+
+```{r}
+modell_kontroll_log_complex <- lmer(
+  log_hsp70_norm ~ omr + (1|omr:lokal) + (1|omr:lokal:behandl:behallare),
+  data = kontroll_data
+)
+
+summary(modell_kontroll_log_complex)
+```
+
+Får nu en mycket mer robust modell när det gäller modellens antaganden. Vi har jämn spridning i res vs. fitted. En mycket bättre qq plot, det bekräftas vidare av histogramen. Undersöker nu numeriskt via \`summary\`.
+
+```{r}
+summary(modell_kontroll_log)
+```
+
+```{r}
+anova(modell_kontroll_log, modell_kontroll_log_complex)
+```
+
+Vi ser att omr:lokal:behallare har varians 0 och standard deviation 0. Det kan tyda på att skillnaderna mellan behållare A och B i en och samma lokal är så små att den är försumbar. Vi har även error om singular fit som tyder på överanpassning. Vi förenklar därmed modellen på följande sätt:
+
+```{r}
+# modell 1: original skala
+modell_kontroll_orig <- lmer(
+  hsp70_norm ~ omr + (1 | omr:lokal),
+  data = kontroll_data
+)
+
+
+# modell 2: log-transformerad
+modell_kontroll_log <- lmer(
+  log_hsp70_norm ~ omr + (1 | omr:lokal) ,
+  data = kontroll_data
+)
+
+res_orig <- residuals(modell_kontroll_orig)
+fitted_orig <- fitted(modell_kontroll_orig)
+
+res_log <- residuals(modell_kontroll_log)
+fitted_log <- fitted(modell_kontroll_log)
+
+par(mfrow = c(2,3))
+# original res vs fitted
+plot(fitted_orig, res_orig, 
+     main = "Residuals vs. Fitted (Original)", 
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# qq 
+qqnorm(res_orig, main = "QQ-plot Residuals (Original)")
+qqline(res_orig, col = "red")
+
+# histogram residualerna
+hist(res_orig, main = "Histogram Residuals (Original)", xlab = "Residuals")
+
+# log transofmrerad diagnostik
+plot(fitted_log, res_log, 
+     main = "Residuals vs. Fitted (Log)", 
+     xlab = "Fitted Values (log-scale)", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+
+qqnorm(res_log, main = "QQ-plot Residuals (Log)")
+qqline(res_log, col = "red")
+
+
+hist(res_log, main = "Histogram Residuals (Log)", xlab = "Residuals")
+
+par(mfrow = c(1, 1))
+```
+
+```{r}
+summary(modell_kontroll_log)
+```
+
+Med ett p-värde på omrS på 0.0998 kan vi inte på $\alpha = 0.05$ förkasta nollhypotesen som säger att områdena inte har någon skillnad, dvs. $H_0 : \text{omrS = omrN} = 0$. På $\alpha = 0.1$ skulle vi kunna förkasta nollhypotesen däremot.
+
+Vi kollar även på variansen av den slumpmässiga effekten från omr:lokal eftersom det är just det som genererar slumpmässig variation i kontrollgruppen då.
+
+```{r}
+anova <- anova(modell_kontroll_orig, modell_kontroll_log)
+anova
+```
+
+Ser ett samma ungefär samma AIC och BIC mellan dessa två. Även om chisq p-värdet är 0.5346, alltså inte alls signifikant så ser vi att modellens antaganden uppfylls betydligt mycket bättre och vi väljer därmed att behålla log modellen.
+
+# Analys av behandlingseffekten
+
+## Jämförelse av modell med interaktion och modell utan interaktion
+
+```{r}
+raw_data$log_hsp70_norm <- log(raw_data$hsp70_norm)
+
+
+modell_full_main <- lmer(
+    log_hsp70_norm ~ omr + behandl + (1 | omr:lokal),
+    data = raw_data
+)
+
+# interaktion hos området och behandlingen
+modell_interaktion <- lmer(
+    log_hsp70_norm ~ omr * behandl + (1 | omr:lokal),
+    data = raw_data
+)
+
+# # interaktion 2
+# modell_interaktion_extra <- lmer(
+#     log_hsp70_norm ~ omr * behandl + behandl * omr_lokal  + (1 | omr_lokal),
+#     data = raw_data)
+
+# anova(modell_full_main)
+anova_result <- anova(modell_full_main, modell_interaktion) 
+anova_result
+
+summary(modell_full_main)
+```
+
+Vi ser att interaktionen inte är statistiskt signifikant och vi har därmed god anledning till att välja den enklare modellen, `modell_full_main`. Om vi så vill så skulle den enklare modellen även vara bättre i prediktion på grund av den lägre AIC och BIC.
+
+Vi kan se att vi har signifikans på behandlKontroll med ett pvärde på 0.00564 som tyder på att behandlingen har en signifikant effekt på musslornas normerade hsp70 värde. Vi kan även se att omrS ligger väldigt nära signifikans nivån på 0.05292.
+
+```{r}
+confint(modell_full_main)
+confint(modell_interaktion)
+
+```
+
+Om ett konfidens intervall för en parameter inte inkluderar noll anses den effekten statistiskt signifikant.
+
+-   Vi har alltså att omrS i både fallen är statistiskt signifikant som återigen tyder på signifkans precis enligt tidigare analys.
+
+-   Detsamma kan sägas för behandlKontroll.
+
+-   Att interceptet innehåller 0 betyder att det inte finns något signifkant skillnad från det förväntade log(hsp70-norm) värdet och 0.
+
+-   Att slumpfaktorn sig01 inkluderar 0, precis 0,000000 tyder på att denna slumpfelet är försumsbar och kan vara anldeningen till singular fit.
+
+-   sig01, sigma innehåller inte 0 och kan därmed anses som verkliga slumpfaktorer i modellen som bekräftar att modellen kan som ska användas är den blandade modellen för att hantera den hierarkiska strukturen i datan.
+
+```{r}
+
+# Modell på originalskalan (icke-log)
+modell_original <- lmer(
+  hsp70_norm ~ omr + behandl + (1 | omr:lokal),
+  data = raw_data
+)
+
+# Modell på den log-transformerade skalan
+modell_log <- lmer(
+  log_hsp70_norm ~ omr + behandl + (1 | omr:lokal),
+  data = raw_data
+)
+
+#----------------------------------------------------------------
+# 2. Hämta residualer och anpassade värden
+#----------------------------------------------------------------
+res_orig <- residuals(modell_original)
+fitted_orig <- fitted(modell_original)
+
+res_log <- residuals(modell_log)
+fitted_log <- fitted(modell_log)
+
+#----------------------------------------------------------------
+# 3. Skapa 2x3-plotten
+#----------------------------------------------------------------
+# Sätt upp layouten för 2 rader och 3 kolumner
+par(mfrow = c(2, 3))
+
+# --- Rad 1: Plotter för originalskalan ---
+# Plot 1: Residuals vs Fitted
+plot(fitted_orig, res_orig, 
+     main = "Original: Residuals vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# Plot 2: Q-Q Plot
+qqnorm(res_orig, main = "Original: QQ-plot")
+qqline(res_orig, col = "red")
+
+# Plot 3: Histogram
+hist(res_orig, main = "Original: Histogram", xlab = "Residuals")
+
+# --- Rad 2: Plotter för log-transformerad skala ---
+# Plot 4: Residuals vs Fitted
+plot(fitted_log, res_log, 
+     main = "Log: Residuals vs. Fitted", 
+     xlab = "Fitted Values (log-scale)", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# Plot 5: Q-Q Plot
+qqnorm(res_log, main = "Log: QQ-plot")
+qqline(res_log, col = "red")
+
+# Plot 6: Histogram
+hist(res_log, main = "Log: Histogram", xlab = "Residuals")
+
+# Återställ layouten till standard (en enda plot)
+par(mfrow = c(1, 1))
+```
+
+## Outliers
+
+Vi såg inga outliers som vi bör lägga märke till efter log-transformationen men det var bara på kontroll dataseten. För att inte upprepa samma undersökning om outliers så kollar vi nu igen på den hela dataseten.
+
+```{r}
+cooks_d <- cooks.distance(modell_full_main)
+
+raw_data$cooks_d <- cooks_d
+influential_points <- filter(raw_data, cooks_d > (4 / nrow(raw_data)))
+
+plot(cooks_d,
+     type = "h",
+     main = "Cook's Distance för Slutgiltig Modell",
+    xlab = "Observationsnummer", ylab = "Cook's Distance"
+)
+abline(h = (4 / nrow(raw_data)), col = "red", lty = 2)
+top3_indices <- order(cooks_d, decreasing = TRUE)[1:3]
+top3_indices
+```
+
+Vi ser ganska många outliers baserat på Cook's distance men det kan bero på helt naturligt biologiska outliers. Vi undersöker om dessa outliers har någon påverka vå analysen, gör detta genom att ta bort och se vad som händer
+
+```{r}
+outlier_rows <- c(25, 56, 45) 
+
+# skapa ett nytt dataset som exkluderar dessa rader
+data_no_outliers <- raw_data[-outlier_rows, ]
+
+#anpassa exakt samma slutgiltiga modell på det nya datasetet
+modell_utan_outliers <- lmer(
+  log_hsp70_norm ~ omr + behandl + (1 | omr:lokal),
+  data = data_no_outliers
+)
+
+
+```
+
+## Added Variable Plots
+
+```{r}
+# Beräkna effekten för termen "behandl"
+effekt_behandling <- effect("behandl", modell_utan_outliers)
+par(mfrow =c(1,2))
+# Plotta effekten av behandlingen
+# Detta visar det predikterade medelvärdet av log_hsp70_norm för Kontroll vs. Cu,
+# justerat för effekten av område (omr).
+# Felstaplarna representerar 95% konfidensintervall.
+plot(effekt_behandling,
+     main="Effekt av Behandling på log(HSP70)",
+     ylab="Predikterad log(hsp70_norm)",
+     xlab="Behandling")
+
+# Beräkna effekten för termen "omr"
+effekt_omrade <- effect("omr", modell_utan_outliers)
+
+# Plotta effekten av området
+# Detta visar det predikterade medelvärdet av log_hsp70_norm för Nord vs. Syd,
+# justerat för effekten av behandling (behandl).
+plot(effekt_omrade,
+     main="Effekt av Område på log(HSP70)",
+     ylab="Predikterad log(hsp70_norm)",
+     xlab="Område")
+par(mfrow=c(1,1))
+```
+
+Tolkar första plotten som att på grund av överlappningen kan vi inte säga att det finns något signifikant skillnad emellan behandlingen och kontrollen. Plot 2 verkar visa en signifikant skillnad vilket återigen tyder på att det verkligen finns en miljömässigt faktor som påverkar Nord och Syd musslor.
+
+```{r}
+# extrahera koefficienterna från båda modellerna
+summary_original <- summary(modell_full_main)$coefficients
+summary_no_outliers <- summary(modell_utan_outliers)$coefficients
+
+comparison_df <- data.frame(
+  Effekt = c("Behandling (Kontroll vs. Cu)", "Område (Syd vs. Nord)", 
+           "Behandling (Kontroll vs. Cu)", "Område (Syd vs. Nord)"),
+  Modell = c(rep("Med alla data", 2), rep("Utan outliers", 2)),
+  Estimat = c(summary_original["behandlKontroll", "Estimate"],
+              summary_original["omrS", "Estimate"],
+              summary_no_outliers["behandlKontroll", "Estimate"],
+              summary_no_outliers["omrS", "Estimate"]),
+  `P-värde` = c(summary_original["behandlKontroll", "Pr(>|t|)"],
+                summary_original["omrS", "Pr(>|t|)"],
+                summary_no_outliers["behandlKontroll", "Pr(>|t|)"],
+                summary_no_outliers["omrS", "Pr(>|t|)"]),
+  check.names = FALSE
+)
+
+
+knitr::kable(comparison_df, 
+             digits = 4, 
+             caption = "Jämförelse av modellresultat med och utan inflytelserika observationer.")
+
+```
+
+Vi kan se att området omvandlades till ett signifkant variabel med ett pvärde på 0.0404 och det är därför rimligt att säga att dessa outliers kan vara på grund av mätfel men behandlingen fortsatt vara signifkant även om pvärdet höjdes marginalt.
+
+Intressant nog blev områden alltså signifkant som kan tyda på att det var ordentligt avvikande mätvärden som dolde den systematiska skillnaden mellan nord och syd.
+
+På grund av att det inte har skett något stor skillnad i behandlingen så tolkas det som att outliers inte riktigt var outliers men istället var helt enkelt naturligt förekommande extrema fall. Däremot bör områdes jämförelsen tolkas lite mer försiktigt på grund av skiftet i signifikans.
+
+```{r}
+fixed_effects <- summary(modell_full_main)$coefficients
+
+# effekt av behandling (Kontroll vs. Cu)
+# estimatet är log(Kontroll) - log(Cu), så vi byter tecken för att få log(Cu) - log(Kontroll)
+log_effect_behandling <- -fixed_effects["behandlKontroll", "Estimate"]
+# tar exp för att bli av med log 
+procent_okning <- (exp(log_effect_behandling) - 1) * 100
+
+cat("Kopparbehandling ökar i genomsnitt HSP70-nivåerna med", procent_okning , "procent jämfört med kontrollgruppen.")
+```
+
+```{r}
+# effekt av område (Syd vs. Nord)
+log_effect_omrade <- fixed_effects["omrS", "Estimate"]
+procent_minskning <- (1 - exp(log_effect_omrade)) * 100
+
+cat("Musslor från syd har i snitt", procent_minskning, "procent lägre HSP70 nivåer än från nord.")
+```
+
+```{r}
+modell_enkel_slump <- lmer(
+  log_hsp70_norm ~ omr + behandl + (1 | omr:lokal),
+  data = raw_data
+)
+
+modell_enkel_interaktion <- lmer(
+  log_hsp70_norm ~ omr * behandl + (1 | omr:lokal),
+  data = raw_data
+)
+# summary(modell_enkel_slump)
+
+anova(modell_enkel_slump, modell_enkel_interaktion)
+```
+
+```{r}
+# Steg 2: Beräkna interaktionseffekten
+interaction_eff <- effect("omr:behandl", modell_enkel_interaktion)
+
+# Visa de beräknade medelvärdena
+summary(interaction_eff)
+
+# Steg 3: Plotta effekten
+# plot()-funktionen känner automatiskt igen att det är en interaktion och ritar en samspelsplot
+plot(interaction_eff,
+     main = "Samspelsplot för Område och Behandling",
+     ylab = "Predikterad log(hsp70_norm)",
+     xlab = "Behandling",
+     lines = list(multiline = TRUE), # Säkerställer separata linjer för Nord/Syd
+     confint = list(style = "bars") # Visar konfidensintervall som staplar
+)
+```
+
+Återigen, tyder på att samspel inte har någon påverka på grund av dem parallela linjer
+
+```{r}
+# Steg 2: Beräkna interaktionseffekten
+interaction_eff <- effect("omr:behandl", modell_enkel_slump)
+
+# Visa de beräknade medelvärdena
+summary(interaction_eff)
+
+# Steg 3: Plotta effekten
+# plot()-funktionen känner automatiskt igen att det är en interaktion och ritar en samspelsplot
+plot(interaction_eff,
+     main = "Samspelsplot för Område och Behandling",
+     ylab = "Predikterad log(hsp70_norm)",
+     xlab = "Behandling",
+     lines = list(multiline = TRUE), # Säkerställer separata linjer för Nord/Syd
+     confint = list(style = "bars") # Visar konfidensintervall som staplar
+)
+```

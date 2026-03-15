@@ -1,0 +1,514 @@
+---
+title: "Projekt A7: Prissätning av persondatorer"
+author:
+  - Sebastijan Babic
+  - Per Kornelius Haaland
+  - Emelie Wang
+  - Zara Fuhrmann
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    df_print: paged
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    fig_caption: true
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - "\\usepackage{amsmath}"
+  - "\\usepackage{graphicx}"
+  - "\\usepackage{booktabs}"
+---
+
+
+
+
+
+\pagebreak
+# EDA (Exploratory Data Analysis)
+
+Läser in datan först:
+
+```{r}
+data <- read.csv("A7_datorer.csv")
+```
+
+
+```{r}
+sum(is.na(data))
+```
+
+Har alltså inga NaN värden som vi behöver hantera.
+
+```{r}
+data
+```
+
+Då dataseten är ganska liten undersöker vi datan manuellt. Vi ser följande:
+
+\- Kolumn x5 \| cd verkar ha några värde som representerar hastigheten: 8x, 12x, 16x, 20x, 24x som behöver kategoriseras i konkreta siffror, detta görs med `factor`\`, vi kollapsar dessa till en gemensam "Other" kategori. 
+
+\- Kolumn x6 \| program: verkar ha programnamn som är ovanliga: """".
+
+Låt oss omvandla kategoriska datan till faktorer för att kunna göra beräkningar och plottar tillsammans med dessa datatyper:
+
+
+Låt oss skapa en ny dataset med den städade datan:
+
+```{r}
+cleaned_data <- data
+
+# hanterar ovanliga programnamn
+cleaned_data$x6 <- factor(cleaned_data$x6)
+levels(cleaned_data$x6)[levels(cleaned_data$x6) %in% c('""""', "WinNT4.0", "Win95", "MSOffice", "WinNT")] <- "j"
+
+# kollapasar alla CD-hastigheter till en gemensam Other kategori på grund av brist på sample för dem olika hastigheterna separat
+cleaned_data$x5 <- factor(cleaned_data$x5)
+levels(cleaned_data$x5)[levels(cleaned_data$x5) %in% c("8x", "12x", "16x", "20x", "24x")] <- "Other"
+
+# omvandla till faktorer
+cleaned_data$x1 <- factor(cleaned_data$x1)
+
+
+cleaned_data
+```
+
+## Hantering av outliers
+
+Skapar först en grundmodell:
+```{r}
+full_model <- lm(y ~ x1 + x2 + x3 + x4 + x5 + x6 + x7, data = data)
+```
+
+
+### Testar multikolinjäritet via Variance Inflation Factor 
+Testar VIF för att redan nu se om det faktiskt något multikolinjäritet hos alla förklarande variablerna. 
+```{r}
+library(car)
+vif_values <- vif(full_model)
+vif_values
+```
+Där vi kan kategorisera VIF i följande kategorier:
+
+- VIF nära 1: svag eller ingen multikolinearitet
+- VIF mellan 1 och 5: en del multikolinearitet men acceptabelt
+- VIF större än 5: stark multikolinearitet
+
+Verkar inte finnas några multikolinjära förklarande variabler även om några är lite högre än önskad. 
+
+
+```{r}
+plot(full_model, main ="Q-Q plot med hela dataseten")
+```
+
+
+### Outliers via Cook's distance
+Vi hanterar outliers via Cook's distance. Vi kör med vanliga metoden som är att ta bort alla observationer där Cook's distance är större än 4/n, dvs. har en viss threshold som om datapunkter överstiger så tar vi bort dem. 
+
+
+
+```{r}
+# Full modell
+full_model <- lm(log(y) ~ x1 + x2 + x3 + x4 + x5 + x6 + x7, data = cleaned_data)
+cooks_d_full <- cooks.distance(full_model)
+cook_threshold_full <- 4 / nrow(cleaned_data)
+outlier_indices_full <- which(cooks_d_full > cook_threshold_full)
+data_no_outliers_full <- cleaned_data[-outlier_indices_full, ]
+
+# Minimierad modell
+minimized_model <- lm(log(y) ~ x1 + x2 + x3 + x7, data = cleaned_data)
+cooks_d_min <- cooks.distance(minimized_model)
+cook_threshold_min <- 4 / nrow(cleaned_data)
+outlier_indices_min <- which(cooks_d_min > cook_threshold_min)
+data_no_outliers_min <- cleaned_data[-outlier_indices_min, ]
+
+# Backward elimination (baserat på full modell utan outliers från full_model)
+backward_model <- step(full_model, direction = "backward", trace = FALSE)
+cooks_d_back <- cooks.distance(backward_model)
+cook_threshold_back <- 4 / nrow(cleaned_data)
+outlier_indices_back <- which(cooks_d_back > cook_threshold_back)
+data_no_outliers_back <- cleaned_data[-outlier_indices_back, ]
+
+```
+
+
+\pagebreak
+# Modeller som används
+Skapa nu modeller baserade på det renare datan `data_no_outlier`. 
+
+## Full modell
+
+```{r}
+# full modell med ren data
+full_model_no_outliers <- lm(log(y) ~ x1 + x2 + x3 + x4 + x5 + x6 + x7, data = data_no_outliers_full)
+
+formula(full_model_no_outliers)
+summary(full_model_no_outliers)$adj.r.squared
+
+par(mfrow=c(2,2))
+plot(full_model_no_outliers)
+par(mfrow=c(1,1))
+
+vif(full_model_no_outliers)
+```
+
+
+
+
+## Minimierad modell baserat på signifikans
+
+```{r}
+# minimierad modell baserad på signifikans från början
+minimized_model <- lm(log(y) ~ x1 + x2 + x3 + x7, data = data_no_outliers_min)
+par(mfrow=c(2,2))
+plot(minimized_model)
+par(mfrow=c(1,1))
+
+vif(minimized_model)
+```
+
+
+
+```{r}
+formula(minimized_model)
+summary(minimized_model)$r.squared
+summary(minimized_model)$adj.r.squared
+```
+
+
+## Backward Elimination 
+
+```{r}
+test <- lm(log(y) ~ x1 + x2 + x3 + x4 + x6 + x7, data = data_no_outliers_back)
+backward_model_no_outliers <- step(test, direction = "backward", trace = FALSE) # trace=FALSE döljer utskriften av varje steg
+
+formula(backward_model_no_outliers)
+
+summary(backward_model_no_outliers)$r.squared
+summary(backward_model_no_outliers)$adj.r.squared
+
+par(mfrow=c(2,2))
+plot(backward_model_no_outliers)
+par(mfrow=c(1,1))
+
+vif(backward_model_no_outliers)
+```
+
+
+
+Vi ser att backward elimination ger oss en annan modell från det vi beslutade var lämplig baserat på signifikans och förklaringsgrad. Dessutom så är modellen med alla förklarande variabler bättre i termer av justerad förklaringsgrad. 
+
+
+
+
+\pagebreak
+# Sammanställning av alla förklaringsgrader 
+```{r, echo = FALSE}
+models <- c(
+  "Full modell",
+  "Minimized modell",
+  "Backward elimination"
+)
+
+# dataset som används (alla samma, för jämförbarhet)
+datasets <- c(
+  "data_no_outliers_full",
+  "data_no_outliers_min",
+  "data_no_outliers_back"
+)
+
+
+adj_r2 <- c(
+  summary(full_model_no_outliers)$adj.r.squared,
+  summary(minimized_model)$adj.r.squared,
+  summary(backward_model_no_outliers)$adj.r.squared
+)
+
+# variabler som formeltext
+variables <- c(
+  deparse(formula(full_model_no_outliers)),
+  deparse(formula(minimized_model)),
+  deparse(formula(backward_model_no_outliers))
+)
+
+# skapa data.frame för enklare avläsning
+summary_table <- data.frame(
+  Modell = models,
+  Dataset = datasets,
+  Adjusted_R2 = round(adj_r2, 3),
+  Variabler = variables,
+  stringsAsFactors = FALSE
+)
+
+library(knitr)
+kable(summary_table, caption = "Sammanställning av modeller med justerad R2, dataset och inkluderade variabler")
+
+```
+
+
+
+
+Gällande modellantanganden, dvs: 
+
+1. Linjäritet, alltså sambandet mellan dem förklarande variablerna och responsvariabeln ska vara linjär. 
+2. Oberoende observationer, 
+3. Homoeskadicitet (konstant varians), 
+4. Normalfördelade residualer,
+5. Ingen perfekt multikolinearitet, se sista avsnitten 
+
+
+
+
+Sar fått några nya punkter som har hög Cook's distance, det är rimligt eftersom datapunkter kan få mer inflytelse om de väldigt extrema inte längre finns. Residualerna befinner sig för det mesta inuti områden i först plotten. Har några nya outliers i termer av leverage och Cook's men det vore orimligt att ta bort dem nya outliers nu igen, sällan man skulle faktiskt eliminiera alla outliers perfekt. Har en approximativ normalfördelning på histogramen. Det tyder på att modellen är väl acceptabel men inget att flexa om. 
+
+
+
+Verkar få lite mindre outliers här vilket är rimligt på grund av eliminering av några förklarande variabler. Det förbättrar i princip allt förutom då histogramen som verkar få en lite tjockare högre svans. Men i sin helhet verkar denna modell passa lite bättre baserat på dessa plottar. 
+
+
+
+
+Någon sorts middle-ground för alla 3 modellerna. 
+
+```{r}
+# Funktion för att plotta diagnostik för given modell och dataset
+plot_diagnostics <- function(model, data, main_title_prefix = "") {
+  n <- nrow(data)
+  cook_threshold <- 4 / n
+  
+  par(mfrow = c(2,2))
+  
+  # Standardiserade residualer
+  std_resid <- rstandard(model)
+  plot(std_resid, main = paste(main_title_prefix, "Standardiserade residualer"), ylab = "Standardiserad residual")
+  abline(h = c(-2, 2), col = "red", lty = 2)
+  
+  # Leverage
+  leverage_vals <- hatvalues(model)
+  plot(leverage_vals, main = paste(main_title_prefix, "Leverage-värden"), ylab = "Leverage")
+  abline(h = 2 * mean(leverage_vals), col = "red", lty = 2)
+  
+  # Cook's distance
+  cooks_d <- cooks.distance(model)
+  plot(cooks_d, main = paste(main_title_prefix, "Cook's distance"), ylab = "Cook's distance")
+  abline(h = cook_threshold, col = "red", lty = 2)
+  
+  # Histogram av residualer
+  residual_vals <- residuals(model)
+  hist(residual_vals, breaks = 20, main = paste(main_title_prefix, "Histogram av residualer"), xlab = "Residualer")
+  
+  par(mfrow = c(1,1))
+}
+
+# Användning exempel för full_model_no_outliers och dess data
+plot_diagnostics(full_model_no_outliers, data_no_outliers_full, main_title_prefix = "Full modell")
+# För minimized_model och dess dataset
+plot_diagnostics(minimized_model, data_no_outliers_min, main_title_prefix = "Minimerad modell")
+# För backward_model och dess dataset
+plot_diagnostics(backward_model_no_outliers, data_no_outliers_back, main_title_prefix = "Backward elimination")
+
+```
+
+
+```{r}
+summary(backward_model_final)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+\pagebreak
+
+# RMSE & den prediktiva förmågan (Enklare korsvalidering)
+
+För att undersöka den prediktiva förmågan så behöver vi dela upp datan i tränings- och testdata. Vi delar upp datan i $80\%$ träningsdata och $20\%$ testdata, ett vanligt fördelning för test av prediktionsförmågan. Vi testar prediktionsförmågan via RMSE. 
+
+
+```{r}
+set.seed(123)
+# skapar en vektor som innehåller 80% av datan  
+train_index <- sample(seq_len(nrow(cleaned_data)), size = 0.8 * nrow(cleaned_data))
+train_data <- cleaned_data[train_index, ]
+test_data <- cleaned_data[-train_index, ]
+
+full_model_train <- lm(y ~ x1 + x2 + x3 + x4 + x5 + x6 + x7, data = train_data)
+
+pred_test_full <- predict(full_model_train, test_data)
+rmse_test_full <- sqrt(mean((test_data$y - pred_test_full)^2))
+print(rmse_test_full)
+
+
+
+minimized_model_train <- lm(y ~ x1 + x2 + x7, data = train_data)
+pred_test_min <- predict(minimized_model_train, test_data)
+rmse_test_min <- sqrt(mean((test_data$y - pred_test_min)^2))
+print(rmse_test_min)
+
+
+
+backward_model_train <- step(full_model_train, direction = "backward", trace = FALSE)
+pred_test_back <- predict(backward_model_train, test_data)
+rmse_test_back <- sqrt(mean((test_data$y - pred_test_back)^2))
+print(rmse_test_back)
+
+mean(test_data$y)
+
+
+```
+Ser alltså att alla modeller är någorlunda lika i RMSE som kan tyda på att alla modellerna är ungefär lika bra på att prediktera priset. Dvs. är skillnaden från priset i snittet via prediktionen ungefär 2500.  
+
+
+
+```{r}
+set.seed(123)
+# Dela data i träning och test
+train_index <- sample(seq_len(nrow(cleaned_data)), size = 0.8 * nrow(cleaned_data))
+train_data <- cleaned_data[train_index, ]
+test_data <- cleaned_data[-train_index, ]
+
+# Träna modell på log(y)
+log_model <- lm(log(y) ~ x1 + x2 + x3 + x4 + x5 + x6 + x7, data = train_data)
+
+# Prediktion på testdata i log-skala
+log_pred <- predict(log_model, newdata = test_data)
+
+# Back-transformera till originalskalan
+pred_original <- exp(log_pred)
+
+# RMSE i originalskala
+rmse_original <- sqrt(mean((test_data$y - pred_original)^2))
+print(paste("RMSE i originalskala:", round(rmse_original, 2)))
+
+```
+
+
+
+
+
+
+
+
+# Vidare korsvalidering via LOOCV (Leave-One-Out Cross Validation)
+
+LOOCV är i princip en förbättrad metod av det som gjordes i tidigare avsnitt. Fick det av chatten. 
+```{r}
+library(caret)
+set.seed(123)
+train_control <- trainControl(method = "LOOCV")
+loocv_model <- train(
+  log(y) ~ x1 + x2 + x3 + x4 + x5 + x6 + x7,
+  data = data_no_outliers_full,
+  method = "lm",
+  trControl = train_control
+)
+
+loocv_model$results
+```
+
+
+Får en error om rank-deficient fit, det kan tyda på multikolinearitet då vi tar med alla förklarande variabler. Tittar då på om detta är sant via biblioteket `car` och funktionen `vif` därifrån. Se nästa avsnitten. 
+
+
+
+
+
+```{r}
+set.seed(123)
+train_control <- trainControl(method = "LOOCV")
+loocv_model <- train(
+  log(y) ~ x1 + x2 + x3 + x7,
+  data = data_no_outliers_min,
+  method = "lm",
+  trControl = train_control
+)
+
+loocv_model$results
+```
+```{r}
+library(caret)
+set.seed(123)
+
+# Anpassa LOOCV kontroll
+train_control <- trainControl(method = "LOOCV", 
+                              savePredictions = "final",
+                              summaryFunction = defaultSummary)
+
+# Träna med caret på log(y)
+loocv_model <- train(
+  log(y) ~ x1 + x2 + x3 + x4 + x5 + x7,
+  data = data_no_outliers_back,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"
+)
+
+# De prediktioner caret genererar är i log-skala
+# Back-transformation av prediktionerna
+loocv_model$pred$pred_original <- exp(loocv_model$pred$pred)
+loocv_model$pred$obs_original <- exp(loocv_model$pred$obs)
+
+# Beräkna RMSE i originalskala manuellt
+rmse_original <- sqrt(mean((loocv_model$pred$obs_original - loocv_model$pred$pred_original)^2))
+cat("LOOCV RMSE i originalskala:", rmse_original, "\n")
+
+# Visa det vanliga caret-resultatet (log-skala)
+print(loocv_model$results)
+```
+
+
+Vi kan se att backwards modellen verkar vara bäst när vi jämför RMSE, $R^2$ och även MAE.
+
+
+
+
+
+
+
+
+
+
+# Kommentarer om multikolinearitet
+
+Ser alltså att modellen med alla förklarande variabler presterar bäst i termer av justerad förklaringsgrad. Det är dock lite konstigt då många av dessa variabler var inte alls nära signifkans-nivån. Det kan tyda på något annat som påverkar modellens passande, det kan tyda på multikolineratitet. Vi undersöker detta med package `cat` där vi använder oss av `VIF`, dvs. Variance Inflation Factor.
+
+$$
+\text{VIF} = \frac{1}{1 - R^2_\text{adj}}
+$$
+
+Där vi kan kategorisera VIF i följande kategorier:
+
+- VIF nära 1: svag eller ingen multikolinearitet
+- VIF mellan 1 och 5: en del multikolinearitet men acceptabelt
+- VIF större än 5: stark multikolinearitet
+
+
+```{r}
+vif_values <- vif(full_model_no_outliers)
+vif_values
+```
+
+```{r}
+vif_values <- vif(minimized_model)
+vif_values
+```
+
+```{r}
+vif_values <- vif(backward_model_no_outliers)
+vif_values
+```
+
+Vi ser i `full_model_no_outlier` att `x4,x5` har ganska VIF vilken kan tyda på att modellen inte bör användas på grund av bland annat överanpassning. 
+
+
